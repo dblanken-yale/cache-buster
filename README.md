@@ -2,6 +2,14 @@
 
 A Claude Code mod that shows how much time is left on the prompt cache, so you can keep a session going (or compact it) before the cache expires.
 
+Desktop app:
+
+![cache-buster above the prompt in Claude Code Desktop](docs/screenshot.png)
+
+Terminal:
+
+![cache-buster above the prompt in the Claude Code terminal](docs/screenshot-terminal.png)
+
 ## Why
 
 Claude Code caches your conversation between requests, for an hour or for five minutes depending on your account (see [Which cache length you have](#which-cache-length-you-have)). While the cache is warm, each new message reads the conversation back from the cache at a tenth of the normal input price or less, so it is at least 90% cheaper (95% on Opus 5.5).
@@ -13,12 +21,6 @@ This mod shows how long you have before that happens. If you have a long session
 Prices are from the [Claude pricing page](https://platform.claude.com/docs/en/about-claude/pricing#prompt-caching), checked 2026-10-02.
 
 ## What it shows
-
-```
-● cache 56m left ▮ ▮ ▮ ▮ ▮ ▮ ▮ ▮ ▮ ▮ ▮ ▮ ▮ ▮ ▮ ▮ ▮ ▮ ▮ ▯ 98% hit [Compact]
-```
-
-(Roughly; the real bar is 20 colored blocks.)
 
 The goal is two things: keep the cache from expiring, and keep the hit rate high on each request. Each piece of the row helps with one of them.
 
