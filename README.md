@@ -6,6 +6,14 @@ A Claude Code mod that shows how much time is left on the prompt cache, so you c
 ● cache 56m left ███████████████████░ 98% hit [Compact]
 ```
 
+## Why
+
+Claude Code caches your conversation for up to an hour between requests. While the cache is warm, each new message reads the conversation back from the cache at about a tenth of the normal input price, so it is roughly 90% cheaper.
+
+If you go more than an hour without sending anything, the cache expires. Your next message pays full price for the whole conversation again, plus the cost of writing it back to the cache. The more context you have built up, the more that one message costs.
+
+This mod shows how long you have before that happens. If you have a long session going and know you'll be away past the hour, press Compact first. The conversation shrinks to a short summary, so the message that starts it up again is cheap.
+
 - **Time left:** each request to the model refreshes the cache. The bar starts full after a request and drains to empty over 60 minutes.
 - **Dot color:** green, then yellow from 45m used, then red from 55m used.
 - **Hit rate:** the share of the last request's input tokens that were read from the cache.
