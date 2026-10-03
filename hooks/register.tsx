@@ -55,7 +55,8 @@ export const register: Register = on => {
     if (e.props.hasSurvey || at === null) return next(e)
 
     const ageMin = Math.max(0, Math.floor(((await read($, now)) - at) / 60_000))
-    const filled = Math.min(CELLS, Math.round((ageMin / TTL_MIN) * CELLS))
+    const leftMin = Math.max(0, TTL_MIN - ageMin)
+    const filled = Math.round((leftMin / TTL_MIN) * CELLS)
     const color = ageMin >= WARN_MIN ? 'red' : ageMin >= 45 ? 'yellow' : 'green'
     const rate = Math.round((await read($, hitRate)) * 100)
     const { Box, Button, Text } = $.ui.resolve(e)
@@ -64,8 +65,8 @@ export const register: Register = on => {
       <Box>
         <Text color={color}>● </Text>
         <Text>
-          cache {ageMin >= TTL_MIN ? 'expired' : `${ageMin}m`} {'▪'.repeat(filled)}
-          {'▫'.repeat(CELLS - filled)} {rate}% hit{' '}
+          cache {leftMin === 0 ? 'expired' : `${leftMin}m left`} {'█'.repeat(filled)}
+          {'░'.repeat(CELLS - filled)} {rate}% hit{' '}
         </Text>
         <Button
           key="compact"
