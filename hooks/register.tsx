@@ -1,15 +1,15 @@
 import { atom, read, update } from 'claude-code'
 import type { Register } from 'claude-code'
 
-const TTL_MIN = 60
-const WARN_MIN = 55
 const CELLS = 20
 
 const lastAt = atom({ plugin: 'cache-buster', key: 'lastAt' } as const, null)
 const hitRate = atom({ plugin: 'cache-buster', key: 'hitRate' } as const, 0)
 const now = atom({ plugin: 'cache-buster', key: 'now' } as const, 0)
 
-export const register: Register = on => {
+export const register: Register = (on, options) => {
+  const ttl = Number(options.cacheMinutes) || 60
+  const warn = Math.max(1, Math.round(ttl / 12))
   let warned = false
 
   on('session.start', async ($, e, next) => {
@@ -20,9 +20,9 @@ export const register: Register = on => {
       const t = await $.clock.now()
       await update($, now, () => t)
       const at = await read($, lastAt)
-      if (at !== null && !warned && (t - at) / 60_000 >= WARN_MIN) {
+      if (at !== null && !warned && ttl - (t - at) / 60_000 <= warn) {
         warned = true
-        $.ui.toast('Cache expires in ~5m. Compact or send something.')
+        $.ui.toast(`Cache expires in ~${warn}m. Compact or send something.`)
       }
     })
     return started
@@ -55,9 +55,9 @@ export const register: Register = on => {
     if (e.props.hasSurvey || at === null) return next(e)
 
     const ageMin = Math.max(0, Math.floor(((await read($, now)) - at) / 60_000))
-    const leftMin = Math.max(0, TTL_MIN - ageMin)
-    const filled = Math.round((leftMin / TTL_MIN) * CELLS)
-    const color = ageMin >= WARN_MIN ? 'red' : ageMin >= 45 ? 'yellow' : 'green'
+    const leftMin = Math.max(0, ttl - ageMin)
+    const filled = Math.round((leftMin / ttl) * CELLS)
+    const color = leftMin <= warn ? 'red' : leftMin <= ttl / 4 ? 'yellow' : 'green'
     const rate = Math.round((await read($, hitRate)) * 100)
     const { Box, Button, Text } = $.ui.resolve(e)
 

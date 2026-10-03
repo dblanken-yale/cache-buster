@@ -1,6 +1,15 @@
 {
   "name": "cache-buster",
   "version": "0.1.0",
-  "description": "Band above the prompt showing prompt-cache age, hit rate, and a Compact button before the 1-hour TTL lapses.",
-  "types": "./types/index.d.ts"
+  "description": "Band above the prompt showing prompt-cache age, hit rate, and a Compact button before the cache expires.",
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "cacheMinutes": {
+      "type": "string",
+      "title": "Cache length (minutes)",
+      "description": "Prompt cache length in minutes. Use 5 if your account uses the 5-minute cache.",
+      "options": ["60", "5"],
+      "default": "60"
+    }
+  }
 }
