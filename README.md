@@ -2,10 +2,6 @@
 
 A Claude Code mod that shows how much time is left on the prompt cache, so you can keep a session going (or compact it) before the cache expires.
 
-```
-● cache 56m left ███████████████████░ 98% hit [Compact]
-```
-
 ## Why
 
 Claude Code caches your conversation between requests, for an hour or for five minutes depending on your account (see [Which cache length you have](#which-cache-length-you-have)). While the cache is warm, each new message reads the conversation back from the cache at a tenth of the normal input price or less, so it is at least 90% cheaper (95% on Opus 5.5).
@@ -18,13 +14,51 @@ Prices are from the [Claude pricing page](https://platform.claude.com/docs/en/ab
 
 ## What it shows
 
-- **Time left:** each request to the model refreshes the cache. The bar starts full after a request and drains to empty over the cache length (60 minutes by default).
-- **Dot color:** green, then yellow in the last quarter of the cache, then red in the last 5 minutes on the 1-hour cache (last 1 minute on the 5-minute cache).
-- **Hit rate:** the share of the last request's input tokens that were read from the cache.
-- **Warning:** a popup at the same point as red (5 minutes left, or 1 minute on the 5-minute cache) says the cache is about to expire.
-- **Compact:** runs the same thing as `/compact`.
+```
+● cache 56m left ▮ ▮ ▮ ▮ ▮ ▮ ▮ ▮ ▮ ▮ ▮ ▮ ▮ ▮ ▮ ▮ ▮ ▮ ▮ ▯ 98% hit [Compact]
+```
 
-Subagent requests don't count, since they don't refresh the main conversation's cache.
+(Roughly; the real bar is 20 colored blocks.)
+
+The goal is two things: keep the cache from expiring, and keep the hit rate high on each request. Each piece of the row helps with one of them.
+
+### Dot
+
+How close the cache is to expiring.
+
+| Color | Means | What to do |
+| --- | --- | --- |
+| Green | Plenty of time | Nothing |
+| Yellow | Running low (15 minutes left on the 1-hour cache, 2 minutes on the 5-minute cache) | If you're about to step away, decide now whether to compact |
+| Red | About to expire (5 minutes left, or 1 minute on the 5-minute cache) | Send a message to keep the cache, or press Compact |
+
+### Time left and bar
+
+How long until the cache expires, counted from the last request Claude Code sent for this conversation. Every request refreshes the cache, so the bar refills to full each time Claude replies. It drains one block every 3 minutes on the 1-hour cache. Remaining blocks take the dot's color, and used blocks turn gray. At zero the label reads `expired`, and your next message pays the full price described in [Why](#why).
+
+Requests made by subagents don't refresh it, since they don't use the main conversation's cache.
+
+### Hit rate
+
+The share of the last request's input that was read from the cache instead of processed fresh. Higher is better: cached input costs a tenth of the normal price or less, while fresh input costs full price, or twice that when it's written into the 1-hour cache.
+
+| Hit rate | Usually means |
+| --- | --- |
+| 90% to 100% | Normal. Almost the whole conversation came from the cache. |
+| Low, right after a new session, `/clear`, or a compact | Expected. Nothing was cached yet, and the next request should be back up near 100%. |
+| Near 0% in the middle of a session | The cache was lost. Either it expired, or something invalidated it: switching models, connecting or removing an MCP server, or a Claude Code upgrade. See [Actions that invalidate the cache](https://code.claude.com/docs/en/prompt-caching#actions-that-invalidate-the-cache). |
+
+It only describes the last request. It says nothing about time left; the countdown covers that.
+
+### Compact button
+
+Runs the same thing as `/compact`. It replaces the conversation with a short summary, so the next request only has to cache that summary instead of the whole history. Use it when the dot is yellow or red and you know you'll be away past the cache length. Compacting while the cache is still warm is cheap, because the summarizing request reads the conversation from the cache. Compacting after it expires costs a full uncached read of the history.
+
+The row hides after any compact (the button, `/compact`, or an automatic one) and comes back with the next reply. If Claude is mid-reply, the button can't compact, and a popup says why.
+
+### Warning popup
+
+Appears once when the dot turns red: "Cache expires in ~5m. Compact or send something." (~1m on the 5-minute cache). It shows once per idle stretch and resets with the next request.
 
 ## Which cache length you have
 
