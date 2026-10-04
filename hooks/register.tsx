@@ -71,32 +71,37 @@ export const register: Register = (on, options) => {
     const color = leftMin <= warn ? 'red' : leftMin <= caution ? 'yellow' : 'green'
     const rate = Math.round(hit * 100)
     const { Box, Button, Text } = $.ui.resolve(e)
+    // Stack whatever the bands beneath draw (other mods), instead of hiding it.
+    const below = await next(e)
 
     return (
-      <Box>
-        <Text color={color}>● </Text>
-        <Text dimColor>cache </Text>
-        <Text color={color}>{leftMin === 0 ? 'expired' : `${leftMin}m left`} </Text>
-        <Box gap={1}>
-          {Array.from({ length: CELLS }, (_, i) => (
-            <Text key={`cell${i}`} backgroundColor={i < filled ? color : 'gray'}>
-              {' '}
-            </Text>
-          ))}
+      <Box flexDirection="column">
+        <Box>
+          <Text color={color}>● </Text>
+          <Text dimColor>cache </Text>
+          <Text color={color}>{leftMin === 0 ? 'expired' : `${leftMin}m left`} </Text>
+          <Box gap={1}>
+            {Array.from({ length: CELLS }, (_, i) => (
+              <Text key={`cell${i}`} backgroundColor={i < filled ? color : 'gray'}>
+                {' '}
+              </Text>
+            ))}
+          </Box>
+          <Text dimColor> {rate}% hit </Text>
+          <Button
+            key="compact"
+            label="Compact"
+            onPress={() =>
+              $.session.compact().then(
+                r => {
+                  if (r.skip) $.ui.toast(`Compact skipped: ${r.skip}`)
+                },
+                (err: unknown) => $.ui.toast(err instanceof Error ? err.message : String(err)),
+              )
+            }
+          />
         </Box>
-        <Text dimColor> {rate}% hit </Text>
-        <Button
-          key="compact"
-          label="Compact"
-          onPress={() =>
-            $.session.compact().then(
-              r => {
-                if (r.skip) $.ui.toast(`Compact skipped: ${r.skip}`)
-              },
-              (err: unknown) => $.ui.toast(err instanceof Error ? err.message : String(err)),
-            )
-          }
-        />
+        {below}
       </Box>
     )
   })

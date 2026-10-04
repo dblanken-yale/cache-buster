@@ -128,5 +128,19 @@ Terminal sessions reload the mod when its files change. Desktop app sessions pic
   ```
 
   The display updates once a minute, so the 5-minute cache is coarse.
-- To check it after editing: `claude plugin validate ~/.claude/mods/cache-buster`.
+- It shares the row above the prompt with other mods. Claude Code shows one tree there, built by a chain of hooks: the top mod's hook draws first, and the mods beneath only draw if it calls `next(e)`. cache-buster calls `next(e)`, gets back whatever the mods beneath drew, and stacks it under its own bar in a column (`hooks/register.tsx`, the `AbovePrompt` hook). Before this, it returned only its own bar, which hid any other mod's row once the first reply came in. A mod that draws in this row should do the same:
+
+  ```tsx
+  const below = await next(e)
+
+  return (
+    <Box flexDirection="column">
+      <Box>{/* this mod's row */}</Box>
+      {below}
+    </Box>
+  )
+  ```
+
+  When there's nothing to show, call `return next(e)` instead, as the hook already does before the first reply.
+- To check it after editing: `claude plugin validate ~/.claude/mods/cache-buster` and `claude plugin test ~/.claude/mods/cache-buster`.
 - `tsconfig.json` points at `.claude-plugin/types/`, which Claude Code generates and git ignores, so type-checking a fresh clone needs those files regenerated first.
