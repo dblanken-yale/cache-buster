@@ -4,10 +4,15 @@ import type { EngineInterface, Register } from 'claude-code'
 const CELLS = 20
 // Past this many tokens of context, models tend to lose focus.
 const CONTEXT_WARN = 200_000
+// Red at this fraction of the model's context window: close to auto-compact.
+// ponytail: 80% of the window approximates the auto-compact point; the exact threshold is only
+// in $.session.usage({ breakdown: 'summary' }) (rawMaxTokens), if precision ever matters.
+const CONTEXT_ALARM = 0.8
 
 const lastAt = atom({ plugin: 'cache-buster', key: 'lastAt' } as const, null)
 const hitRate = atom({ plugin: 'cache-buster', key: 'hitRate' } as const, 0)
 const context = atom({ plugin: 'cache-buster', key: 'context' } as const, 0)
+const window = atom({ plugin: 'cache-buster', key: 'window' } as const, 0)
 const now = atom({ plugin: 'cache-buster', key: 'now' } as const, 0)
 
 let warned = false
@@ -61,6 +66,8 @@ export const register: Register = (on, options) => {
     await update($, now, () => t)
     await update($, hitRate, () => (total ? u.cache_read_input_tokens / total : 0))
     await update($, context, () => total)
+    const { context: c } = await $.session.usage()
+    await update($, window, () => c.window)
     return r
   })
 
@@ -68,11 +75,17 @@ export const register: Register = (on, options) => {
     const at = await read($, lastAt)
     if (e.props.hasSurvey || at === null) return next(e)
 
-    const [t, hit, ctx] = await Promise.all([read($, now), read($, hitRate), read($, context)])
+    const [t, hit, ctx, win] = await Promise.all([
+      read($, now),
+      read($, hitRate),
+      read($, context),
+      read($, window),
+    ])
     const ageMin = Math.max(0, Math.floor((t - at) / 60_000))
     const leftMin = Math.max(0, ttl - ageMin)
     const filled = Math.round((leftMin / ttl) * CELLS)
     const color = leftMin <= warn ? 'red' : leftMin <= caution ? 'yellow' : 'green'
+    const ctxColor = win && ctx >= win * CONTEXT_ALARM ? 'red' : ctx > CONTEXT_WARN ? 'yellow' : undefined
     const rate = Math.round(hit * 100)
     const { Box, Button, Text } = $.ui.resolve(e)
     // Stack whatever the bands beneath draw (other mods), instead of hiding it.
@@ -92,7 +105,7 @@ export const register: Register = (on, options) => {
             ))}
           </Box>
           <Text dimColor> {rate}% hit </Text>
-          <Text color={ctx > CONTEXT_WARN ? 'yellow' : undefined} dimColor={ctx <= CONTEXT_WARN}>
+          <Text color={ctxColor} dimColor={!ctxColor}>
             {Math.round(ctx / 1000)}k ctx{' '}
           </Text>
           <Button

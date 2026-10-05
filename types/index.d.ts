@@ -7,6 +7,8 @@ declare module 'claude-code' {
       hitRate: number
       /** Input tokens of that request: the conversation's context size. */
       context: number
+      /** The model's context window in tokens, read after each request; 0 before the first. */
+      window: number
       /** Epoch ms, refreshed every minute so the band redraws. */
       now: number
     }
