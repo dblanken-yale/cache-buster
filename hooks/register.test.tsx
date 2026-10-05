@@ -24,6 +24,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
 
     const after = await $.ui.mount({ ...BAND, surface } as never)
     expect(await after.find({ text: /90% hit/ })).toBeTruthy()
+    expect(await after.find({ text: /0k ctx/ })).toBeTruthy()
     expect(await after.find({ text: /other mod row/ })).toBeTruthy()
   })
 }

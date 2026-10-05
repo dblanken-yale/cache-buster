@@ -52,6 +52,10 @@ The share of the last request's input that was read from the cache instead of pr
 
 It only describes the last request. It says nothing about time left; the countdown covers that.
 
+### Context size
+
+How many tokens the last request sent, which is the size of the conversation so far (for example `142k ctx`). It turns yellow past 200k. That is a rule of thumb, not a hard limit: answers tend to get less focused as context grows, so past this point it is worth compacting or starting fresh.
+
 ### Compact button
 
 Runs the same thing as `/compact`. It replaces the conversation with a short summary, so the next request only has to cache that summary instead of the whole history. Use it when the dot is yellow or red and you know you'll be away past the cache length. Compacting while the cache is still warm is cheap, because the summarizing request reads the conversation from the cache. Compacting after it expires costs a full uncached read of the history.

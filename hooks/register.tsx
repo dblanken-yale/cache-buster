@@ -2,9 +2,12 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 const CELLS = 20
+// Past this many tokens of context, models tend to lose focus.
+const CONTEXT_WARN = 200_000
 
 const lastAt = atom({ plugin: 'cache-buster', key: 'lastAt' } as const, null)
 const hitRate = atom({ plugin: 'cache-buster', key: 'hitRate' } as const, 0)
+const context = atom({ plugin: 'cache-buster', key: 'context' } as const, 0)
 const now = atom({ plugin: 'cache-buster', key: 'now' } as const, 0)
 
 let warned = false
@@ -57,6 +60,7 @@ export const register: Register = (on, options) => {
     await update($, lastAt, () => t)
     await update($, now, () => t)
     await update($, hitRate, () => (total ? u.cache_read_input_tokens / total : 0))
+    await update($, context, () => total)
     return r
   })
 
@@ -64,7 +68,7 @@ export const register: Register = (on, options) => {
     const at = await read($, lastAt)
     if (e.props.hasSurvey || at === null) return next(e)
 
-    const [t, hit] = await Promise.all([read($, now), read($, hitRate)])
+    const [t, hit, ctx] = await Promise.all([read($, now), read($, hitRate), read($, context)])
     const ageMin = Math.max(0, Math.floor((t - at) / 60_000))
     const leftMin = Math.max(0, ttl - ageMin)
     const filled = Math.round((leftMin / ttl) * CELLS)
@@ -88,6 +92,9 @@ export const register: Register = (on, options) => {
             ))}
           </Box>
           <Text dimColor> {rate}% hit </Text>
+          <Text color={ctx > CONTEXT_WARN ? 'yellow' : undefined} dimColor={ctx <= CONTEXT_WARN}>
+            {Math.round(ctx / 1000)}k ctx{' '}
+          </Text>
           <Button
             key="compact"
             label="Compact"
