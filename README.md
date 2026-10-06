@@ -123,11 +123,11 @@ Desktop app sessions pick up the new version when you start a new one.
 Clone the repo and load it from the folder, so edits reload as you save:
 
 ```bash
-git clone git@github.com:dblanken-yale/cache-buster.git ~/.claude/mods/cache-buster
+git clone git@github.com:dblanken-yale/cache-buster.git ~/code/cache-buster
 ```
 
 ```bash
-claude --plugin-dir ~/.claude/mods/cache-buster
+claude --plugin-dir ~/code/cache-buster
 ```
 
 To load it in every session, add the folder to `CLAUDE_CODE_PLUGIN_DIRS` in the `env` block of `~/.claude/settings.json` (folders separated by `:`). Don't also install it from the marketplace, or it loads twice.
@@ -157,5 +157,5 @@ Bump `version` in `.claude-plugin/plugin.json` with every release. Installed cop
   ```
 
   When there's nothing to show, call `return next(e)` instead, as the hook already does before the first reply.
-- To check it after editing: `claude plugin validate ~/.claude/mods/cache-buster` and `claude plugin test ~/.claude/mods/cache-buster`.
+- To check it after editing: `claude plugin validate ~/code/cache-buster` and `claude plugin test ~/code/cache-buster`.
 - `tsconfig.json` points at `.claude-plugin/types/`, which Claude Code generates and git ignores, so type-checking a fresh clone needs those files regenerated first.
