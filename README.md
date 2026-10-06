@@ -60,7 +60,7 @@ How many tokens the last request sent, which is the size of the conversation so 
 
 Runs the same thing as `/compact`. It replaces the conversation with a short summary, so the next request only has to cache that summary instead of the whole history. Use it when the dot is yellow or red and you know you'll be away past the cache length. Compacting while the cache is still warm is cheap, because the summarizing request reads the conversation from the cache. Compacting after it expires costs a full uncached read of the history.
 
-The row hides after any compact (the button, `/compact`, or an automatic one) and comes back with the next reply. If Claude is mid-reply, the button can't compact, and a popup says why.
+The row hides after any compact (the button, `/compact`, or an automatic one) and comes back with the next reply. If Claude is mid-reply, the button waits and compacts as soon as the reply finishes.
 
 ### Warning popup
 

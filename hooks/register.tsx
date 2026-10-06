@@ -17,9 +17,32 @@ const now = atom({ plugin: 'cache-buster', key: 'now' } as const, 0)
 
 let warned = false
 
+// Set when Compact is pressed mid-turn; the compact runs at the next turn.complete.
+let pending = false
+
 async function reset($: EngineInterface) {
   warned = false
+  pending = false
   await update($, lastAt, () => null)
+}
+
+// The engine refuses to compact while a turn runs, so hold it for the end of the turn.
+function queue($: EngineInterface) {
+  if (!pending) $.ui.toast('Will compact when this reply finishes.')
+  pending = true
+}
+
+async function compact($: EngineInterface) {
+  try {
+    const r = await $.session.compact()
+    pending = false
+    if (r.skip) $.ui.toast(`Compact skipped: ${r.skip}`)
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    if (msg.includes('a turn is running')) return queue($)
+    pending = false
+    $.ui.toast(msg)
+  }
 }
 
 export const register: Register = (on, options) => {
@@ -51,6 +74,12 @@ export const register: Register = (on, options) => {
   on('session.compact', async ($, e, next) => {
     const r = await next(e)
     if (!e.agentId && e.trigger !== 'precompute' && !r.skip) await reset($)
+    return r
+  })
+
+  on('turn.complete', async ($, e, next) => {
+    const r = await next(e)
+    if (pending && !e.agentId) void compact($)
     return r
   })
 
@@ -111,14 +140,7 @@ export const register: Register = (on, options) => {
           <Button
             key="compact"
             label="Compact"
-            onPress={() =>
-              $.session.compact().then(
-                r => {
-                  if (r.skip) $.ui.toast(`Compact skipped: ${r.skip}`)
-                },
-                (err: unknown) => $.ui.toast(err instanceof Error ? err.message : String(err)),
-              )
-            }
+            onPress={() => (e.props.isWorking ? queue($) : compact($))}
           />
         </Box>
         {below}
