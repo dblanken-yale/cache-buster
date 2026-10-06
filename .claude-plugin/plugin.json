@@ -1,6 +1,6 @@
 {
   "name": "cache-buster",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Band above the prompt showing prompt-cache age, hit rate, and a Compact button before the cache expires.",
   "types": "./types/index.d.ts",
   "userConfig": {

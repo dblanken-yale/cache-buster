@@ -89,39 +89,50 @@ claude -p "hello" --output-format json
 
 ## Install
 
-1. Clone the repo into your mods folder:
+Run these in Claude Code:
 
-   ```bash
-   git clone git@github.com:dblanken-yale/cache-buster.git ~/.claude/mods/cache-buster
-   ```
+```
+/plugin marketplace add dblanken-yale/cache-buster
+/plugin install cache-buster@cache-buster
+```
 
-2. Add the folder to `CLAUDE_CODE_PLUGIN_DIRS` in the `env` block of `~/.claude/settings.json`:
+Or from a terminal:
 
-   ```json
-   {
-     "env": {
-       "CLAUDE_CODE_PLUGIN_DIRS": "~/.claude/mods/cache-buster"
-     }
-   }
-   ```
+```bash
+claude plugin marketplace add dblanken-yale/cache-buster
+```
 
-   If the variable already lists other folders, add this one with a `:` between them, for example `"~/.claude/mods/statusline:~/.claude/mods/cache-buster"`.
+```bash
+claude plugin install cache-buster@cache-buster
+```
 
-3. Start a new Claude Code session, in the terminal or the desktop app. The row appears above the prompt after the first reply.
+Start a new Claude Code session, in the terminal or the desktop app. The row appears above the prompt after the first reply.
 
-To try it in one terminal session without changing settings:
+## Update
+
+Turn on auto-update for the `cache-buster` marketplace in `/plugin` (Marketplaces tab), and new versions install when Claude Code starts. To update by hand:
+
+```bash
+claude plugin marketplace update cache-buster
+```
+
+Desktop app sessions pick up the new version when you start a new one.
+
+## Develop
+
+Clone the repo and load it from the folder, so edits reload as you save:
+
+```bash
+git clone git@github.com:dblanken-yale/cache-buster.git ~/.claude/mods/cache-buster
+```
 
 ```bash
 claude --plugin-dir ~/.claude/mods/cache-buster
 ```
 
-## Update
+To load it in every session, add the folder to `CLAUDE_CODE_PLUGIN_DIRS` in the `env` block of `~/.claude/settings.json` (folders separated by `:`). Don't also install it from the marketplace, or it loads twice.
 
-```bash
-git -C ~/.claude/mods/cache-buster pull
-```
-
-Terminal sessions reload the mod when its files change. Desktop app sessions pick it up when you start a new one.
+Bump `version` in `.claude-plugin/plugin.json` with every release. Installed copies only update when the version changes.
 
 ## Notes
 

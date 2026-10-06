@@ -1,0 +1,12 @@
+{
+  "name": "cache-buster",
+  "owner": { "name": "David Blankenship" },
+  "metadata": { "description": "Prompt-cache countdown band for Claude Code" },
+  "plugins": [
+    {
+      "name": "cache-buster",
+      "description": "Band above the prompt showing prompt-cache age, hit rate, and a Compact button before the cache expires.",
+      "source": "./"
+    }
+  ]
+}
