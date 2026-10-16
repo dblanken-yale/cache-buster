@@ -1,4 +1,4 @@
-import { expect, test } from 'claude-code/testing'
+import { expect, mock, test } from 'claude-code/testing'
 
 const BAND = { plugin: 'cache-buster', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: false } }
 
@@ -51,7 +51,7 @@ test('Compact pressed mid-turn waits for turn.complete', async ($, on) => {
   on('ui.render', ($, e) => h($.ui.resolve(e).Text, {}, 'x') as never)
   on('clock.now', () => ({ value: 1_000_000 }) as never)
   on('session.usage', () => ({ value: { context: { window: 100 } } }) as never)
-  on('ui.toast', () => ({}) as never)
+  on('ui.toast', () => ({ value: undefined }) as never)
   on('session.compact', () => {
     calls++
     return { skip: 'test' } as never
@@ -63,6 +63,9 @@ test('Compact pressed mid-turn waits for turn.complete', async ($, on) => {
       usage: { input_tokens: 10, cache_read_input_tokens: 90, cache_creation_input_tokens: 0, output_tokens: 1 },
     } as never
   })
+  on('clock.every', () => ({ value: undefined }) as never)
+  on('session.start', ($, e) => ({ cwd: e.cwd }) as never)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   for await (const _ of $.turn.step({ turnId: 't', index: 0, model: 'm', messageCount: 1 } as never)) { /* drain */ }
 
   const m = await $.ui.mount({ ...BAND, props: { ...BAND.props, isWorking: true }, surface: 'terminal' } as never)
@@ -72,3 +75,56 @@ test('Compact pressed mid-turn waits for turn.complete', async ($, on) => {
   await $.turn.complete({ turnId: 't', answer: '' } as never)
   expect(calls).toBe(1)
 })
+
+for (const isInteractive of [true, false]) {
+  test(`Compact shows only in an interactive session (${isInteractive})`, async ($, on) => {
+    on('ui.render', ($, e) => h($.ui.resolve(e).Text, {}, 'x') as never)
+    on('clock.now', () => ({ value: 1_000_000 }) as never)
+    on('clock.every', () => ({ value: undefined }) as never)
+    on('session.usage', () => ({ value: { context: { window: 100 } } }) as never)
+    on('session.start', ($, e) => ({ cwd: e.cwd }) as never)
+    on('turn.step', async function* () {
+      return {
+        turnId: 't', index: 0, answer: '', toolUses: [], stopReason: 'end_turn',
+        usage: { input_tokens: 10, cache_read_input_tokens: 90, cache_creation_input_tokens: 0, output_tokens: 1 },
+      } as never
+    })
+    await $.session.start({ cwd: '/', surface: null, isInteractive })
+    for await (const _ of $.turn.step({ turnId: 't', index: 0, model: 'm', messageCount: 1 } as never)) { /* drain */ }
+
+    const m = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
+    expect(await m.find({ text: /90% hit/ })).toBeTruthy()
+    expect(JSON.stringify(await m.find({ text: /90% hit/ })).includes('"compact"')).toBe(isInteractive)
+  })
+}
+
+for (const isInteractive of [true, false]) {
+  test(`near expiry, hints at /compact only in a headless session (${isInteractive})`, async ($, on) => {
+    const clock = mock.clock(on, { now: 1_000_000 })
+    const toasts: string[] = []
+    on('ui.render', ($, e) => h($.ui.resolve(e).Text, {}, 'x') as never)
+    on('ui.toast', (_, e) => {
+      toasts.push((e as { text: string }).text)
+      return { value: undefined } as never
+    })
+    on('session.usage', () => ({ value: { context: { window: 100 } } }) as never)
+    on('session.start', ($, e) => ({ cwd: e.cwd }) as never)
+    on('turn.step', async function* () {
+      return {
+        turnId: 't', index: 0, answer: '', toolUses: [], stopReason: 'end_turn',
+        usage: { input_tokens: 10, cache_read_input_tokens: 90, cache_creation_input_tokens: 0, output_tokens: 1 },
+      } as never
+    })
+    await $.session.start({ cwd: '/', surface: null, isInteractive })
+    for await (const _ of $.turn.step({ turnId: 't', index: 0, model: 'm', messageCount: 1 } as never)) { /* drain */ }
+
+    const green = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
+    expect(await green.findAll({ text: /type \/compact/ })).toEqual([])
+    await green.unmount()
+
+    await clock.advance(56 * 60_000)
+    expect(toasts).toEqual([`Cache expires in ~5m. ${isInteractive ? 'Compact' : 'Type /compact'} or send something.`])
+    const red = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
+    expect((await red.findAll({ text: /type \/compact/ })).length > 0).toBe(!isInteractive)
+  })
+}

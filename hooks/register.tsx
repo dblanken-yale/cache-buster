@@ -20,6 +20,10 @@ let warned = false
 // Set when Compact is pressed mid-turn; the compact runs at the next turn.complete.
 let pending = false
 
+// $.session.compact() rejects in a headless session (-p, the SDK, the desktop app), so the
+// Compact button shows only under the terminal REPL; elsewhere the row hints at /compact.
+let interactive = false
+
 async function reset($: EngineInterface) {
   warned = false
   pending = false
@@ -51,6 +55,7 @@ export const register: Register = (on, options) => {
   const caution = Math.max(warn + 1, ttl / 4)
 
   on('session.start', async ($, e, next) => {
+    interactive = e.isInteractive
     const started = await next(e)
     const t0 = await $.clock.now()
     await update($, now, () => t0)
@@ -60,7 +65,7 @@ export const register: Register = (on, options) => {
       const at = await read($, lastAt)
       if (at !== null && !warned && ttl - (t - at) / 60_000 <= warn) {
         warned = true
-        $.ui.toast(`Cache expires in ~${warn}m. Compact or send something.`)
+        $.ui.toast(`Cache expires in ~${warn}m. ${interactive ? 'Compact' : 'Type /compact'} or send something.`)
       }
     })
     return started
@@ -137,11 +142,15 @@ export const register: Register = (on, options) => {
           <Text color={ctxColor} dimColor={!ctxColor}>
             {Math.round(ctx / 1000)}k ctx{' '}
           </Text>
-          <Button
-            key="compact"
-            label="Compact"
-            onPress={() => (e.props.isWorking ? queue($) : compact($))}
-          />
+          {interactive ? (
+            <Button
+              key="compact"
+              label="Compact"
+              onPress={() => (e.props.isWorking ? queue($) : compact($))}
+            />
+          ) : (
+            color !== 'green' && <Text dimColor>type /compact</Text>
+          )}
         </Box>
         {below}
       </Box>
