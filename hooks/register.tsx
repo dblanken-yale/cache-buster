@@ -24,9 +24,23 @@ let pending = false
 // Compact button shows only under the terminal REPL; elsewhere the row hints at /compact.
 let interactive = false
 
+// In-flight background work, as of the last classic.Stop; and the armed check-in timer.
+type Work = { id: string; description: string; type: string }
+let bg: Work[] = []
+let checkInTimer: { cancel(): void } | null = null
+
+function disarm() {
+  checkInTimer?.cancel()
+  checkInTimer = null
+}
+
+const clip = (s: string) => (s.length > 120 ? `${s.slice(0, 117)}...` : s)
+
 async function reset($: EngineInterface) {
   warned = false
   pending = false
+  disarm()
+  bg = []
   await update($, lastAt, () => null)
 }
 
@@ -49,10 +63,43 @@ async function compact($: EngineInterface) {
   }
 }
 
+// Ask the idle main session for a progress report; that turn refreshes the cache.
+async function checkInNow($: EngineInterface, ping: number) {
+  const work = new Map<string, Work>(
+    // Subagents come from agent.list, which has owner and live status; the snapshot has neither.
+    bg.filter((w) => w.type !== 'subagent').map((w) => [w.id, w]),
+  )
+  for (const a of await $.agent.list()) {
+    // Only the main loop's own agents: not a subagent's child, a plugin's, or a teammate.
+    if (a.parentId || a.spawnedBy || a.type === 'teammate') continue
+    if (['pending', 'running', 'waiting'].includes(a.status) && !work.has(a.id)) work.set(a.id, a)
+  }
+  if (!work.size) return
+  $.ui.toast('Cache expires soon; asking for a progress report on background work.')
+  const lines = [...work.values()].map((w) => `- ${clip(w.description)} (${w.type})`).join('\n')
+  void $.prompt.submit({
+    text:
+      `cache-buster check-in: the prompt cache expires in about ${ping}m and background work is still running:\n${lines}\n` +
+      'Reply with a short progress report: what has finished, what is still running, and anything blocked or failing. ' +
+      'Do not start new work, and do not stop or wait on the running tasks.',
+  })
+}
+
+// Fire the check-in `ping` minutes before the cache expires, counted from the last request.
+async function arm($: EngineInterface, ttl: number, ping: number) {
+  disarm()
+  const [at, t] = await Promise.all([read($, lastAt), $.clock.now()])
+  if (at === null) return
+  checkInTimer = $.clock.after(Math.max(0, at + (ttl - ping) * 60_000 - t), () => checkInNow($, ping))
+}
+
 export const register: Register = (on, options) => {
   const ttl = Number(options.cacheMinutes) || 60
   const warn = Math.max(1, Math.round(ttl / 12))
   const caution = Math.max(warn + 1, ttl / 4)
+  // Minutes left on the cache when the check-in fires.
+  const ping = Math.max(1, Math.round(ttl / 15))
+  const checkIn = options.checkIn !== 'off'
 
   on('session.start', async ($, e, next) => {
     interactive = e.isInteractive
@@ -82,9 +129,16 @@ export const register: Register = (on, options) => {
     return r
   })
 
+  on('classic.Stop', async ($, e, next) => {
+    const r = await next(e)
+    bg = e.background_tasks ?? []
+    return r
+  })
+
   on('turn.complete', async ($, e, next) => {
     const r = await next(e)
     if (pending && !e.agentId) void compact($)
+    if (checkIn && !e.agentId) await arm($, ttl, ping)
     return r
   })
 
@@ -94,6 +148,7 @@ export const register: Register = (on, options) => {
 
     const u = r.usage
     const total = u.input_tokens + u.cache_read_input_tokens + u.cache_creation_input_tokens
+    disarm()
     const t = await $.clock.now()
     warned = false
     await update($, lastAt, () => t)

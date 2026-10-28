@@ -128,3 +128,114 @@ for (const isInteractive of [true, false]) {
     expect((await red.findAll({ text: /type \/compact/ })).length > 0).toBe(!isInteractive)
   })
 }
+
+// Background check-in: one main turn, then Stop with a snapshot, then turn.complete arms the timer.
+const STEP = {
+  turnId: 't', index: 0, answer: '', toolUses: [], stopReason: 'end_turn',
+  usage: { input_tokens: 10, cache_read_input_tokens: 90, cache_creation_input_tokens: 0, output_tokens: 1 },
+}
+const TASK = { id: 'b1', type: 'shell', status: 'running', description: 'build the thing' }
+
+async function mainTurn($: any, bgTasks: unknown[]) {
+  for await (const _ of $.turn.step({ turnId: 't', index: 0, model: 'm', messageCount: 1 } as never)) { /* drain */ }
+  await $.classic.Stop({ stop_hook_active: false, background_tasks: bgTasks } as never)
+  await $.turn.complete({ turnId: 't', answer: '' } as never)
+}
+
+function setup(on: any, agents: unknown[] = []) {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  const prompts: string[] = []
+  on('ui.toast', () => ({ value: undefined }) as never)
+  on('session.usage', () => ({ value: { context: { window: 100 } } }) as never)
+  on('agent.list', () => ({ value: agents }) as never)
+  on('classic.Stop', () => ({}) as never)
+  on('turn.complete', () => ({ text: '' }) as never)
+  on('turn.step', async function* () { return STEP as never })
+  on('prompt.submit', (_: unknown, e: { text: string }) => {
+    prompts.push(e.text)
+    return { text: e.text } as never
+  })
+  return { clock, prompts }
+}
+
+test('check-in fires at 56m on the 60m cache while a background task runs', async ($, on) => {
+  const { clock, prompts } = setup(on)
+  await mainTurn($, [TASK])
+  await clock.advance(55 * 60_000)
+  expect(prompts).toEqual([])
+  await clock.advance(60_000)
+  expect(prompts.length).toBe(1)
+  expect(prompts[0]).toContain('build the thing')
+})
+
+test('no check-in when nothing is running', async ($, on) => {
+  const { clock, prompts } = setup(on)
+  await mainTurn($, [])
+  await clock.advance(57 * 60_000)
+  expect(prompts).toEqual([])
+})
+
+test('a running agent from agent.list alone triggers the check-in', async ($, on) => {
+  const { clock, prompts } = setup(on, [
+    { id: 'a1', description: 'review the diff', type: 'subagent', status: 'running' },
+    { id: 'a2', description: 'old job', type: 'subagent', status: 'completed' },
+  ])
+  await mainTurn($, [])
+  await clock.advance(56 * 60_000)
+  expect(prompts.length).toBe(1)
+  expect(prompts[0]).toContain('review the diff')
+  expect(prompts[0]).not.toContain('old job')
+})
+
+test('5m cache checks in at 4m, not 3m', { options: { cacheMinutes: '5' } }, async ($, on) => {
+  const { clock, prompts } = setup(on)
+  await mainTurn($, [TASK])
+  await clock.advance(3 * 60_000)
+  expect(prompts).toEqual([])
+  await clock.advance(60_000)
+  expect(prompts.length).toBe(1)
+})
+
+test('checkIn off submits nothing', { options: { checkIn: 'off' } }, async ($, on) => {
+  const { clock, prompts } = setup(on)
+  await mainTurn($, [TASK])
+  await clock.advance(60 * 60_000)
+  expect(prompts).toEqual([])
+})
+
+test('a new main turn cancels the pending check-in', async ($, on) => {
+  const { clock, prompts } = setup(on)
+  await mainTurn($, [TASK])
+  await clock.advance(30 * 60_000)
+  for await (const _ of $.turn.step({ turnId: 't', index: 0, model: 'm', messageCount: 2 } as never)) { /* drain */ }
+  await clock.advance(30 * 60_000)
+  expect(prompts).toEqual([])
+})
+
+test('agents another plugin or a subagent started do not trigger the check-in', async ($, on) => {
+  const { clock, prompts } = setup(on, [
+    { id: 'a1', description: 'plugin job', type: 'subagent', status: 'running', spawnedBy: 'other-plugin' },
+    { id: 'a2', description: 'child job', type: 'subagent', status: 'running', parentId: 'x' },
+  ])
+  await mainTurn($, [])
+  await clock.advance(56 * 60_000)
+  expect(prompts).toEqual([])
+})
+
+test('a plugin-owned agent in both the snapshot and agent.list does not trigger the check-in', async ($, on) => {
+  const { clock, prompts } = setup(on, [
+    { id: 'a1', description: 'plugin job', type: 'subagent', status: 'running', spawnedBy: 'other-plugin' },
+  ])
+  await mainTurn($, [{ id: 'a1', type: 'subagent', status: 'running', description: 'plugin job' }])
+  await clock.advance(56 * 60_000)
+  expect(prompts).toEqual([])
+})
+
+test('a snapshot subagent that agent.list reports completed does not trigger the check-in', async ($, on) => {
+  const { clock, prompts } = setup(on, [
+    { id: 'a1', description: 'done job', type: 'subagent', status: 'completed' },
+  ])
+  await mainTurn($, [{ id: 'a1', type: 'subagent', status: 'running', description: 'done job' }])
+  await clock.advance(56 * 60_000)
+  expect(prompts).toEqual([])
+})

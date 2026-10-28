@@ -68,6 +68,18 @@ The button shows only when Claude Code runs in a terminal. The desktop app and o
 
 Appears once when the dot turns red: "Cache expires in ~5m. Compact or send something." (~1m on the 5-minute cache). In the desktop app it says "Type /compact or send something." instead. It shows once per idle stretch and resets with the next request.
 
+### Background check-in
+
+When background tasks or subagents are still running and the cache is about to expire, the mod sends Claude a prompt asking for a short progress report. That reply refreshes the cache, and you see where the work stands. It fires 4 minutes before expiry on the 1-hour cache (at the 56 minute mark) and 1 minute before on the 5-minute cache (at the 4 minute mark). Each reply starts a new cache cycle, so work that runs for hours gets a check-in every cycle.
+
+It only fires while Claude is idle, and only if something is still running. It counts only work Claude started in this conversation, not agents started by other plugins or by subagents. The prompt tells Claude not to start new work and not to stop or wait on the running tasks.
+
+To turn it off, set `checkIn` to `off` in the plugin's row in the config menu, or in `~/.claude/settings.json`:
+
+```json
+{ "pluginConfigs": { "cache-buster": { "options": { "checkIn": "off" } } } }
+```
+
 ## Which cache length you have
 
 From [How Claude Code uses prompt caching](https://code.claude.com/docs/en/prompt-caching#which-ttl-each-request-gets), checked 2026-10-02:
@@ -144,7 +156,7 @@ Bump `version` in `.claude-plugin/plugin.json` with every release. Installed cop
   { "pluginConfigs": { "cache-buster": { "options": { "cacheMinutes": "5" } } } }
   ```
 
-  The display updates once a minute, so the 5-minute cache is coarse.
+  The display updates once a minute, so the 5-minute cache is coarse. Options go in the same object, for example `{ "cacheMinutes": "5", "checkIn": "off" }` (see [Background check-in](#background-check-in)).
 - It shares the row above the prompt with other mods. Claude Code shows one tree there, built by a chain of hooks: the top mod's hook draws first, and the mods beneath only draw if it calls `next(e)`. cache-buster calls `next(e)`, gets back whatever the mods beneath drew, and stacks it under its own bar in a column (`hooks/register.tsx`, the `AbovePrompt` hook). Before this, it returned only its own bar, which hid any other mod's row once the first reply came in. A mod that draws in this row should do the same:
 
   ```tsx

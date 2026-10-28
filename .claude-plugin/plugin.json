@@ -1,6 +1,6 @@
 {
   "name": "cache-buster",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Band above the prompt showing prompt-cache age, hit rate, and a Compact button before the cache expires.",
   "types": "./types/index.d.ts",
   "userConfig": {
@@ -10,6 +10,13 @@
       "description": "Prompt cache length in minutes. Use 5 if your account uses the 5-minute cache.",
       "options": ["60", "5"],
       "default": "60"
+    },
+    "checkIn": {
+      "type": "string",
+      "title": "Check in on background work",
+      "description": "Near expiry, ask Claude for a progress report while background tasks or agents run, which keeps the cache warm.",
+      "options": ["on", "off"],
+      "default": "on"
     }
   }
 }
