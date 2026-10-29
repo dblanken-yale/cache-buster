@@ -74,6 +74,15 @@ When background tasks or subagents are still running and the cache is about to e
 
 It only fires while Claude is idle, and only if something is still running. It counts only work Claude started in this conversation, not agents started by other plugins or by subagents. The prompt tells Claude not to start new work and not to stop or wait on the running tasks.
 
+How it knows what is running:
+
+- background shells, monitors and workflows are recorded when Claude starts them (`tool.call`)
+- a task is done once its notification starts a turn (`turn.start`), or Claude stops it with TaskStop
+- for shells, also once `lsof` shows nothing holds the output file open; for monitors, once their time limit passes
+- subagents come from the agent list, which says whether each is still running
+
+The mod does not hook `Stop` or `session.append`. On Team and Enterprise accounts the built-in `cc-plugin-sec-default` plugin passes those two straight past every plugin and Claude Code shows a "hook was skipped" notice on every turn, so leaving them out keeps that notice away. A persistent monitor counts as running until its notification or a TaskStop ends it.
+
 To turn it off, set `checkIn` to `off` in the plugin's row in the config menu, or in `~/.claude/settings.json`:
 
 ```json

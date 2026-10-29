@@ -129,50 +129,148 @@ for (const isInteractive of [true, false]) {
   })
 }
 
-// Background check-in: one main turn, then Stop with a snapshot, then turn.complete arms the timer.
+// Background check-in: a main turn launches background work through tool.call, then
+// turn.complete arms the timer. Stop is never hooked (see the README).
 const STEP = {
   turnId: 't', index: 0, answer: '', toolUses: [], stopReason: 'end_turn',
   usage: { input_tokens: 10, cache_read_input_tokens: 90, cache_creation_input_tokens: 0, output_tokens: 1 },
 }
-const TASK = { id: 'b1', type: 'shell', status: 'running', description: 'build the thing' }
+const SHELL = { tool: 'Bash', command: 'make', description: 'build the thing', run_in_background: true }
 
-async function mainTurn($: any, bgTasks: unknown[]) {
+async function mainTurn($: any, calls: unknown[] = []) {
   for await (const _ of $.turn.step({ turnId: 't', index: 0, model: 'm', messageCount: 1 } as never)) { /* drain */ }
-  await $.classic.Stop({ stop_hook_active: false, background_tasks: bgTasks } as never)
+  for (const c of calls) await $.tool.call(c as never)
   await $.turn.complete({ turnId: 't', answer: '' } as never)
 }
 
-function setup(on: any, agents: unknown[] = []) {
+// lsof answers with `held` for each output file: a pid while the shell runs, '' once it ended
+// (exit 1), or '' with another exit code when lsof itself failed.
+function setup(on: any, agents: unknown[] = [], held: { stdout: string; exitCode?: number } = { stdout: '123\n' }) {
   const clock = mock.clock(on, { now: 1_000_000 })
   const prompts: string[] = []
+  const lsof: string[][] = []
   on('ui.toast', () => ({ value: undefined }) as never)
   on('session.usage', () => ({ value: { context: { window: 100 } } }) as never)
   on('agent.list', () => ({ value: agents }) as never)
-  on('classic.Stop', () => ({}) as never)
   on('turn.complete', () => ({ text: '' }) as never)
+  on('turn.start', (_: unknown, e: { turnId?: string }) => ({ turnId: e.turnId ?? 't2' }) as never)
   on('turn.step', async function* () { return STEP as never })
+  on('process.run', (_: unknown, e: { argv: string[] }) => {
+    lsof.push(e.argv)
+    return { value: { exitCode: held.exitCode ?? (held.stdout ? 0 : 1), stdout: held.stdout, stderr: '' } } as never
+  })
+  on('tool.call', (_: unknown, e: { tool: string; run_in_background?: boolean; persistent?: boolean }) => {
+    if (e.tool === 'Bash' && e.run_in_background) {
+      return {
+        result: { stdout: '', stderr: '', interrupted: false, backgroundTaskId: 'b1' },
+        text: 'Output is being written to: /tmp/x/b1.output',
+      } as never
+    }
+    if (e.tool === 'Monitor') {
+      return { result: e.persistent ? { taskId: 'm1', timeoutMs: 0, persistent: true } : { taskId: 'm1', timeoutMs: 600_000 } } as never
+    }
+    return { result: {} } as never
+  })
   on('prompt.submit', (_: unknown, e: { text: string }) => {
     prompts.push(e.text)
     return { text: e.text } as never
   })
-  return { clock, prompts }
+  return { clock, prompts, lsof }
 }
 
 test('check-in fires at 56m on the 60m cache while a background task runs', async ($, on) => {
-  const { clock, prompts } = setup(on)
-  await mainTurn($, [TASK])
+  const { clock, prompts, lsof } = setup(on)
+  await mainTurn($, [SHELL])
   await clock.advance(55 * 60_000)
   expect(prompts).toEqual([])
   await clock.advance(60_000)
   expect(prompts.length).toBe(1)
-  expect(prompts[0]).toContain('build the thing')
+  expect(prompts[0]).toContain('build the thing (shell)')
+  expect(lsof).toEqual([['lsof', '-t', '--', '/tmp/x/b1.output']])
 })
 
 test('no check-in when nothing is running', async ($, on) => {
   const { clock, prompts } = setup(on)
-  await mainTurn($, [])
+  await mainTurn($, [{ tool: 'Bash', command: 'ls', description: 'list files' }])
   await clock.advance(57 * 60_000)
   expect(prompts).toEqual([])
+})
+
+test('a finished task stops the check-in', async ($, on) => {
+  const { clock, prompts } = setup(on)
+  await mainTurn($, [SHELL])
+  await clock.advance(10 * 60_000)
+  await $.turn.start({
+    turnId: 't2',
+    text: '<task-notification><task-id>b1</task-id><status>completed</status><summary>done</summary></task-notification>',
+  } as never)
+  await mainTurn($)
+  await clock.advance(57 * 60_000)
+  expect(prompts).toEqual([])
+})
+
+test('a monitor event that is not its end keeps the check-in', async ($, on) => {
+  const { clock, prompts } = setup(on)
+  await mainTurn($, [{ tool: 'Monitor', command: 'tail -f log', description: 'watch the log', persistent: true }])
+  await $.turn.start({ turnId: 't2', text: '<task-notification><task-id>m1</task-id><event>line</event></task-notification>' } as never)
+  await mainTurn($)
+  await clock.advance(56 * 60_000)
+  expect(prompts.length).toBe(1)
+  expect(prompts[0]).toContain('watch the log (monitor)')
+})
+
+test('a turn carrying several notifications ends only the tasks that ended', async ($, on) => {
+  const { clock, prompts } = setup(on)
+  await mainTurn($, [SHELL, { tool: 'Monitor', command: 'tail -f log', description: 'watch the log', persistent: true }])
+  await $.turn.start({
+    turnId: 't2',
+    text:
+      '<task-notification><task-id>b1</task-id><status>completed</status></task-notification>\n' +
+      '<task-notification><task-id>m1</task-id><event>line</event></task-notification>',
+  } as never)
+  await mainTurn($)
+  await clock.advance(56 * 60_000)
+  expect(prompts.length).toBe(1)
+  expect(prompts[0]).toContain('watch the log (monitor)')
+  expect(prompts[0]).not.toContain('build the thing')
+})
+
+test('an lsof that fails outright does not end the shell', async ($, on) => {
+  const { clock, prompts } = setup(on, [], { stdout: '', exitCode: 2 })
+  await mainTurn($, [SHELL])
+  await clock.advance(56 * 60_000)
+  expect(prompts.length).toBe(1)
+})
+
+test('a monitor past its time limit does not trigger the check-in', async ($, on) => {
+  const { clock, prompts } = setup(on)
+  await mainTurn($, [{ tool: 'Monitor', command: 'tail -f log', description: 'watch the log', timeout_ms: 600_000 }])
+  await clock.advance(56 * 60_000)
+  expect(prompts).toEqual([])
+})
+
+test('TaskStop stops the check-in', async ($, on) => {
+  const { clock, prompts } = setup(on)
+  await mainTurn($, [SHELL, { tool: 'TaskStop', task_id: 'b1' }])
+  await clock.advance(56 * 60_000)
+  expect(prompts).toEqual([])
+})
+
+test('a shell whose output file nothing holds open does not trigger the check-in', async ($, on) => {
+  const { clock, prompts } = setup(on, [], { stdout: '' })
+  await mainTurn($, [SHELL])
+  await clock.advance(56 * 60_000)
+  expect(prompts).toEqual([])
+})
+
+test('compact keeps the tracked work', async ($, on) => {
+  const { clock, prompts } = setup(on)
+  on('session.compact', () => ({ messages: [{ role: 'user', text: 'summary', toolUses: [] }] }) as never)
+  await mainTurn($, [SHELL])
+  await $.session.compact({ trigger: 'manual', messages: [{ role: 'user', text: 'summary', toolUses: [] }] } as never)
+  await mainTurn($)
+  await clock.advance(56 * 60_000)
+  expect(prompts.length).toBe(1)
 })
 
 test('a running agent from agent.list alone triggers the check-in', async ($, on) => {
@@ -180,7 +278,7 @@ test('a running agent from agent.list alone triggers the check-in', async ($, on
     { id: 'a1', description: 'review the diff', type: 'subagent', status: 'running' },
     { id: 'a2', description: 'old job', type: 'subagent', status: 'completed' },
   ])
-  await mainTurn($, [])
+  await mainTurn($)
   await clock.advance(56 * 60_000)
   expect(prompts.length).toBe(1)
   expect(prompts[0]).toContain('review the diff')
@@ -189,7 +287,7 @@ test('a running agent from agent.list alone triggers the check-in', async ($, on
 
 test('5m cache checks in at 4m, not 3m', { options: { cacheMinutes: '5' } }, async ($, on) => {
   const { clock, prompts } = setup(on)
-  await mainTurn($, [TASK])
+  await mainTurn($, [SHELL])
   await clock.advance(3 * 60_000)
   expect(prompts).toEqual([])
   await clock.advance(60_000)
@@ -198,14 +296,14 @@ test('5m cache checks in at 4m, not 3m', { options: { cacheMinutes: '5' } }, asy
 
 test('checkIn off submits nothing', { options: { checkIn: 'off' } }, async ($, on) => {
   const { clock, prompts } = setup(on)
-  await mainTurn($, [TASK])
+  await mainTurn($, [SHELL])
   await clock.advance(60 * 60_000)
   expect(prompts).toEqual([])
 })
 
 test('a new main turn cancels the pending check-in', async ($, on) => {
   const { clock, prompts } = setup(on)
-  await mainTurn($, [TASK])
+  await mainTurn($, [SHELL])
   await clock.advance(30 * 60_000)
   for await (const _ of $.turn.step({ turnId: 't', index: 0, model: 'm', messageCount: 2 } as never)) { /* drain */ }
   await clock.advance(30 * 60_000)
@@ -217,25 +315,7 @@ test('agents another plugin or a subagent started do not trigger the check-in', 
     { id: 'a1', description: 'plugin job', type: 'subagent', status: 'running', spawnedBy: 'other-plugin' },
     { id: 'a2', description: 'child job', type: 'subagent', status: 'running', parentId: 'x' },
   ])
-  await mainTurn($, [])
-  await clock.advance(56 * 60_000)
-  expect(prompts).toEqual([])
-})
-
-test('a plugin-owned agent in both the snapshot and agent.list does not trigger the check-in', async ($, on) => {
-  const { clock, prompts } = setup(on, [
-    { id: 'a1', description: 'plugin job', type: 'subagent', status: 'running', spawnedBy: 'other-plugin' },
-  ])
-  await mainTurn($, [{ id: 'a1', type: 'subagent', status: 'running', description: 'plugin job' }])
-  await clock.advance(56 * 60_000)
-  expect(prompts).toEqual([])
-})
-
-test('a snapshot subagent that agent.list reports completed does not trigger the check-in', async ($, on) => {
-  const { clock, prompts } = setup(on, [
-    { id: 'a1', description: 'done job', type: 'subagent', status: 'completed' },
-  ])
-  await mainTurn($, [{ id: 'a1', type: 'subagent', status: 'running', description: 'done job' }])
+  await mainTurn($)
   await clock.advance(56 * 60_000)
   expect(prompts).toEqual([])
 })
