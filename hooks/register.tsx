@@ -8,6 +8,9 @@ const CONTEXT_WARN = 200_000
 // ponytail: 80% of the window approximates the auto-compact point; the exact threshold is only
 // in $.session.usage({ breakdown: 'summary' }) (rawMaxTokens), if precision ever matters.
 const CONTEXT_ALARM = 0.8
+// Monitor's own default time limit, for a call that sets none.
+const MONITOR_DEFAULT_TIMEOUT = 300_000
+const ENDED = /^(completed|failed|killed|stopped|done|error|cancelled|canceled|timed[ _-]?out|expired)$/i
 
 const lastAt = atom({ plugin: 'cache-buster', key: 'lastAt' } as const, null)
 const hitRate = atom({ plugin: 'cache-buster', key: 'hitRate' } as const, 0)
@@ -24,10 +27,87 @@ let pending = false
 // Compact button shows only under the terminal REPL; elsewhere the row hints at /compact.
 let interactive = false
 
-// In-flight background work, as of the last classic.Stop; and the armed check-in timer.
-type Work = { id: string; description: string; type: string }
+// Background work the main loop launched and no notification has ended yet; and the armed
+// check-in timer. Tracked from tool.call and turn.start, never Stop: on Team and Enterprise
+// accounts the built-in cc-plugin-sec-default plugin passes Stop past every plugin.
+type Work = {
+  id: string
+  description: string
+  type: string
+  /** A shell's output file: once nothing holds it open, the shell has ended. */
+  outputPath?: string
+  /** Epoch ms a monitor's time limit runs out; absent for a persistent one. */
+  endsAt?: number
+}
 let bg: Work[] = []
 let checkInTimer: { cancel(): void } | null = null
+
+type Loose = Record<string, unknown>
+const str = (v: unknown) => (typeof v === 'string' ? v : '')
+
+// The background task a main-loop call launched, if it launched one. Subagents are left to
+// $.agent.list(), which knows their owner and live status.
+function launched(tool: string, input: Loose, result: Loose, text: string, at: number): Work | undefined {
+  if (tool === 'Bash' && str(result.backgroundTaskId)) {
+    const outputPath =
+      str(result.backgroundOutputPath) ||
+      (/(\/[^\s'"`]+\.output)\b/.exec(text) ?? /written to:?\s*(\/\S+)/i.exec(text))?.[1]
+    return {
+      id: str(result.backgroundTaskId),
+      description: str(input.description) || str(input.command),
+      type: 'shell',
+      ...(outputPath ? { outputPath } : {}),
+    }
+  }
+  if (tool === 'Monitor' && str(result.taskId)) {
+    const limit = Number(result.timeoutMs) || Number(input.timeout_ms) || MONITOR_DEFAULT_TIMEOUT
+    return {
+      id: str(result.taskId),
+      description: str(input.description) || str(input.command),
+      type: 'monitor',
+      ...(result.persistent === true ? {} : { endsAt: at + limit }),
+    }
+  }
+  if (tool === 'Workflow' && str(result.taskId)) {
+    return {
+      id: str(result.taskId),
+      description: str(result.workflowName) || str(input.name) || str(input.scriptPath) || 'workflow',
+      type: 'workflow',
+    }
+  }
+  return undefined
+}
+
+// Each task notification names its task and, once it ended, how it ended. One turn can
+// carry several, so each block is read on its own.
+function absorbNotification(text: string) {
+  const ended = new Set<string>()
+  for (const block of text.split('<task-notification>')) {
+    const id = /<task-id>([^<]+)<\/task-id>/.exec(block)?.[1]?.trim()
+    const status = /<status>([^<]+)<\/status>/.exec(block)?.[1]?.trim() ?? ''
+    if (id && ENDED.test(status)) ended.add(id)
+  }
+  if (ended.size) bg = bg.filter((w) => !ended.has(w.id))
+}
+
+// Drop tasks that ended without a notification turn: a monitor past its limit, or a shell
+// whose output file nothing holds open any more.
+async function prune($: EngineInterface) {
+  const t = await $.clock.now()
+  const ended = new Set<string>()
+  for (const w of bg) {
+    if (w.endsAt !== undefined && t > w.endsAt) ended.add(w.id)
+    if (w.type !== 'shell' || !w.outputPath) continue
+    try {
+      const held = await $.process.run(['lsof', '-t', '--', w.outputPath])
+      // lsof exits 1 when nothing holds the file; any other failure proves nothing.
+      if (held.exitCode <= 1 && held.stdout.trim() === '') ended.add(w.id)
+    } catch {
+      // No lsof: the notification still ends the task.
+    }
+  }
+  if (ended.size) bg = bg.filter((w) => !ended.has(w.id))
+}
 
 function disarm() {
   checkInTimer?.cancel()
@@ -40,7 +120,6 @@ async function reset($: EngineInterface) {
   warned = false
   pending = false
   disarm()
-  bg = []
   await update($, lastAt, () => null)
 }
 
@@ -65,10 +144,8 @@ async function compact($: EngineInterface) {
 
 // Ask the idle main session for a progress report; that turn refreshes the cache.
 async function checkInNow($: EngineInterface, ping: number) {
-  const work = new Map<string, Work>(
-    // Subagents come from agent.list, which has owner and live status; the snapshot has neither.
-    bg.filter((w) => w.type !== 'subagent').map((w) => [w.id, w]),
-  )
+  await prune($)
+  const work = new Map<string, Work>(bg.map((w) => [w.id, w]))
   for (const a of await $.agent.list()) {
     // Only the main loop's own agents: not a subagent's child, a plugin's, or a teammate.
     if (a.parentId || a.spawnedBy || a.type === 'teammate') continue
@@ -119,7 +196,10 @@ export const register: Register = (on, options) => {
   })
 
   on('session.end', async ($, e, next) => {
-    if (e.reason === 'clear') await reset($)
+    if (e.reason === 'clear') {
+      bg = []
+      await reset($)
+    }
     return next(e)
   })
 
@@ -129,9 +209,29 @@ export const register: Register = (on, options) => {
     return r
   })
 
-  on('classic.Stop', async ($, e, next) => {
+  // A background task's notification starts a main turn; an ended one leaves the list.
+  on('turn.start', async ($, e, next) => {
+    if (!e.agentId && e.text.includes('<task-id>')) absorbNotification(e.text)
+    return next(e)
+  })
+
+  on('tool.call', async ($, e, next) => {
     const r = await next(e)
-    bg = e.background_tasks ?? []
+    if (e.agentId || !('result' in r) || r.isError) return r
+    try {
+      const input = e as unknown as Loose
+      const tool = String(e.tool)
+      if (tool === 'TaskStop') {
+        const stopped = str(input.task_id) || str(input.shell_id)
+        bg = bg.filter((w) => w.id !== stopped)
+        return r
+      }
+      const at = tool === 'Monitor' ? await $.clock.now() : 0
+      const work = launched(tool, input, (r.result ?? {}) as Loose, r.text ?? '', at)
+      if (work) bg = [...bg.filter((w) => w.id !== work.id), work].slice(-30)
+    } catch {
+      // Bookkeeping failed: the call's own result still goes back untouched.
+    }
     return r
   })
 
