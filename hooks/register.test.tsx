@@ -77,12 +77,21 @@ test('Compact pressed mid-turn waits for turn.complete', async ($, on) => {
 })
 
 for (const isInteractive of [true, false]) {
-  test(`Compact shows only in an interactive session (${isInteractive})`, async ($, on) => {
+  test(`Compact shows in every session, and falls back to /compact where compact() is refused (${isInteractive})`, async ($, on) => {
+    const ran: string[] = []
     on('ui.render', ($, e) => h($.ui.resolve(e).Text, {}, 'x') as never)
     on('clock.now', () => ({ value: 1_000_000 }) as never)
     on('clock.every', () => ({ value: undefined }) as never)
     on('session.usage', () => ({ value: { context: { window: 100 } } }) as never)
     on('session.start', ($, e) => ({ cwd: e.cwd }) as never)
+    on('session.compact', () => {
+      if (!isInteractive) throw new Error('compact is not available in this session')
+      return { skip: 'test' } as never
+    })
+    on('command.run', (_$, e) => {
+      ran.push(String((e as { command?: string }).command))
+      return { text: '' } as never
+    })
     on('turn.step', async function* () {
       return {
         turnId: 't', index: 0, answer: '', toolUses: [], stopReason: 'end_turn',
@@ -93,13 +102,14 @@ for (const isInteractive of [true, false]) {
     for await (const _ of $.turn.step({ turnId: 't', index: 0, model: 'm', messageCount: 1 } as never)) { /* drain */ }
 
     const m = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
-    expect(await m.find({ text: /90% hit/ })).toBeTruthy()
-    expect(JSON.stringify(await m.find({ text: /90% hit/ })).includes('"compact"')).toBe(isInteractive)
+    expect(JSON.stringify(await m.find({ text: /90% hit/ })).includes('"compact"')).toBe(true)
+    await m.press({ key: 'compact' } as never)
+    expect(ran).toEqual(isInteractive ? [] : ['compact'])
   })
 }
 
 for (const isInteractive of [true, false]) {
-  test(`near expiry, hints at /compact only in a headless session (${isInteractive})`, async ($, on) => {
+  test(`near expiry, toasts to compact in every session (${isInteractive})`, async ($, on) => {
     const clock = mock.clock(on, { now: 1_000_000 })
     const toasts: string[] = []
     on('ui.render', ($, e) => h($.ui.resolve(e).Text, {}, 'x') as never)
@@ -118,14 +128,8 @@ for (const isInteractive of [true, false]) {
     await $.session.start({ cwd: '/', surface: null, isInteractive })
     for await (const _ of $.turn.step({ turnId: 't', index: 0, model: 'm', messageCount: 1 } as never)) { /* drain */ }
 
-    const green = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
-    expect(await green.findAll({ text: /type \/compact/ })).toEqual([])
-    await green.unmount()
-
     await clock.advance(56 * 60_000)
-    expect(toasts).toEqual([`Cache expires in ~5m. ${isInteractive ? 'Compact' : 'Type /compact'} or send something.`])
-    const red = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
-    expect((await red.findAll({ text: /type \/compact/ })).length > 0).toBe(!isInteractive)
+    expect(toasts).toEqual(['Cache expires in ~5m. Compact or send something.'])
   })
 }
 

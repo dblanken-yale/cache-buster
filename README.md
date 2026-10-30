@@ -16,7 +16,7 @@ Claude Code caches your conversation between requests, for an hour or for five m
 
 If you go longer than that without sending anything, the cache expires. Your next message has to write the whole conversation back into the cache, which costs twice the normal input price on the 1-hour cache. That one message costs about 20 times what it would have with a warm cache (40 times on Opus 5.5), and the more context you have built up, the bigger that bill.
 
-This mod shows how long you have before that happens. If you have a long session going and know you'll be away past the hour, press Compact first (in the desktop app, type `/compact`). The conversation shrinks to a short summary, so the message that starts it up again is cheap.
+This mod shows how long you have before that happens. If you have a long session going and know you'll be away past the hour, press Compact first. The conversation shrinks to a short summary, so the message that starts it up again is cheap.
 
 Prices are from the [Claude pricing page](https://platform.claude.com/docs/en/about-claude/pricing#prompt-caching), checked 2026-10-02.
 
@@ -62,11 +62,11 @@ Runs the same thing as `/compact`. It replaces the conversation with a short sum
 
 The row hides after any compact (the button, `/compact`, or an automatic one) and comes back with the next reply. If Claude is mid-reply, the button waits and compacts as soon as the reply finishes.
 
-The button shows only when Claude Code runs in a terminal. The desktop app and other SDK hosts can't compact from a mod, so there the row has no button. In its place, a dim `type /compact` hint appears once the dot turns yellow or red.
+In a terminal the button compacts directly. The desktop app and other SDK hosts refuse that call, so there the button runs `/compact` as a command instead. If the host refuses that too, a toast says to type `/compact`.
 
 ### Warning popup
 
-Appears once when the dot turns red: "Cache expires in ~5m. Compact or send something." (~1m on the 5-minute cache). In the desktop app it says "Type /compact or send something." instead. It shows once per idle stretch and resets with the next request.
+Appears once when the dot turns red: "Cache expires in ~5m. Compact or send something." (~1m on the 5-minute cache). It shows once per idle stretch and resets with the next request.
 
 ### Background check-in
 

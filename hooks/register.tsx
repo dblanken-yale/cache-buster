@@ -24,10 +24,6 @@ let warned = false
 // Set when Compact is pressed mid-turn; the compact runs at the next turn.complete.
 let pending = false
 
-// $.session.compact() rejects in a headless session (-p, the SDK, the desktop app), so the
-// Compact button shows only under the terminal REPL; elsewhere the row hints at /compact.
-let interactive = false
-
 // Background work the main loop launched and no notification has ended yet; and the armed
 // check-in timer. Tracked from tool.call and turn.start, never Stop: on Team and Enterprise
 // accounts the built-in cc-plugin-sec-default plugin passes Stop past every plugin.
@@ -139,7 +135,12 @@ async function compact($: EngineInterface) {
     const msg = err instanceof Error ? err.message : String(err)
     if (msg.includes('a turn is running')) return queue($)
     pending = false
-    $.ui.toast(msg)
+    // Not the REPL: run /compact as if it were typed, which the host may still allow.
+    try {
+      await $.command.run({ command: 'compact' })
+    } catch {
+      $.ui.toast(`Could not compact here (${msg}). Type /compact.`)
+    }
   }
 }
 
@@ -182,7 +183,6 @@ export const register: Register = (on, options) => {
   const ctxWarn = (Number(options.contextWarnK) || CONTEXT_WARN_K) * 1000
 
   on('session.start', async ($, e, next) => {
-    interactive = e.isInteractive
     const started = await next(e)
     const t0 = await $.clock.now()
     await update($, now, () => t0)
@@ -192,7 +192,7 @@ export const register: Register = (on, options) => {
       const at = await read($, lastAt)
       if (at !== null && !warned && ttl - (t - at) / 60_000 <= warn) {
         warned = true
-        $.ui.toast(`Cache expires in ~${warn}m. ${interactive ? 'Compact' : 'Type /compact'} or send something.`)
+        $.ui.toast(`Cache expires in ~${warn}m. Compact or send something.`)
       }
     })
     return started
@@ -301,15 +301,11 @@ export const register: Register = (on, options) => {
           <Text color={ctxColor} dimColor={!ctxColor}>
             {Math.round(ctx / 1000)}k ctx{' '}
           </Text>
-          {interactive ? (
-            <Button
-              key="compact"
-              label="Compact"
-              onPress={() => (e.props.isWorking ? queue($) : compact($))}
-            />
-          ) : (
-            color !== 'green' && <Text dimColor>type /compact</Text>
-          )}
+          <Button
+            key="compact"
+            label="Compact"
+            onPress={() => (e.props.isWorking ? queue($) : compact($))}
+          />
         </Box>
         {below}
       </Box>
