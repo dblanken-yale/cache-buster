@@ -2,8 +2,9 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 const CELLS = 20
-// Past this many tokens of context, models tend to lose focus.
-const CONTEXT_WARN = 200_000
+// Default for the contextWarnK option: past this many tokens of context, models tend to lose
+// focus and every later turn re-reads it all, so the count turns red. Yellow starts at 2/3 of it.
+const CONTEXT_WARN_K = 150
 // Red at this fraction of the model's context window: close to auto-compact.
 // ponytail: 80% of the window approximates the auto-compact point; the exact threshold is only
 // in $.session.usage({ breakdown: 'summary' }) (rawMaxTokens), if precision ever matters.
@@ -177,6 +178,8 @@ export const register: Register = (on, options) => {
   // Minutes left on the cache when the check-in fires.
   const ping = Math.max(1, Math.round(ttl / 15))
   const checkIn = options.checkIn !== 'off'
+  // Tokens of context at which the count turns red; 0 or junk falls back to the default.
+  const ctxWarn = (Number(options.contextWarnK) || CONTEXT_WARN_K) * 1000
 
   on('session.start', async ($, e, next) => {
     interactive = e.isInteractive
@@ -274,7 +277,8 @@ export const register: Register = (on, options) => {
     const leftMin = Math.max(0, ttl - ageMin)
     const filled = Math.round((leftMin / ttl) * CELLS)
     const color = leftMin <= warn ? 'red' : leftMin <= caution ? 'yellow' : 'green'
-    const ctxColor = win && ctx >= win * CONTEXT_ALARM ? 'red' : ctx > CONTEXT_WARN ? 'yellow' : undefined
+    const ctxColor =
+      (win && ctx >= win * CONTEXT_ALARM) || ctx > ctxWarn ? 'red' : ctx > (ctxWarn * 2) / 3 ? 'yellow' : undefined
     const rate = Math.round(hit * 100)
     const { Box, Button, Text } = $.ui.resolve(e)
     // Stack whatever the bands beneath draw (other mods), instead of hiding it.

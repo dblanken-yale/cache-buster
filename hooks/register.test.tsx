@@ -319,3 +319,24 @@ test('agents another plugin or a subagent started do not trigger the check-in', 
   await clock.advance(56 * 60_000)
   expect(prompts).toEqual([])
 })
+
+test('ctx is yellow from 100k and red past 150k', async ($, on) => {
+  let used = 110_000
+  on('ui.render', ($, e) => h($.ui.resolve(e).Text, {}, 'x') as never)
+  on('clock.now', () => ({ value: 1_000_000 }) as never)
+  on('session.usage', () => ({ value: { context: { window: 1_000_000 } } }) as never)
+  on('turn.step', async function* (_$, e) {
+    return {
+      turnId: 't', index: e.index, answer: '', toolUses: [], stopReason: 'end_turn',
+      usage: { input_tokens: used, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, output_tokens: 1 },
+    } as never
+  })
+  const colorAt = async (index: number, tokens: number) => {
+    used = tokens
+    for await (const _ of $.turn.step({ turnId: 't', index, model: 'm', messageCount: 1 } as never)) { /* drain */ }
+    const m = await $.ui.mount({ ...BAND, surface: 'terminal' } as never)
+    return JSON.stringify(await m.find({ text: /k ctx/ }))
+  }
+  expect(await colorAt(0, 110_000)).toContain('"color":"yellow"')
+  expect(await colorAt(1, 160_000)).toContain('"color":"red"')
+})

@@ -1,6 +1,6 @@
 {
   "name": "cache-buster",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "description": "Band above the prompt showing prompt-cache age, hit rate, and a Compact button before the cache expires.",
   "types": "./types/index.d.ts",
   "userConfig": {
@@ -17,6 +17,12 @@
       "description": "Near expiry, ask Claude for a progress report while background tasks or agents run, which keeps the cache warm.",
       "options": ["on", "off"],
       "default": "on"
+    },
+    "contextWarnK": {
+      "type": "string",
+      "title": "Context count turns red at (k tokens)",
+      "description": "Context size, in thousands of tokens, past which the count turns red (yellow from two thirds of it). Default 150.",
+      "default": "150"
     }
   }
 }

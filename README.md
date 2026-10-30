@@ -54,7 +54,7 @@ It only describes the last request. It says nothing about time left; the countdo
 
 ### Context size
 
-How many tokens the last request sent, which is the size of the conversation so far (for example `142k ctx`). It turns yellow past 200k. That is a rule of thumb, not a hard limit: answers tend to get less focused as context grows, so past this point it is worth compacting or starting fresh. It turns red at 80% of the model's context window, near where Claude Code auto-compacts.
+How many tokens the last request sent, which is the size of the conversation so far (for example `142k ctx`). It turns yellow past 100k and red past 150k (or at 80% of the model's context window, whichever comes first). Change the red point with the `contextWarnK` option (in thousands of tokens), for example `{ "contextWarnK": "200" }`; yellow starts at two thirds of it. That is a rule of thumb, not a hard limit: answers tend to get less focused as context grows, and every later turn re-reads all of it, so past this point it is worth compacting or starting fresh.
 
 ### Compact button
 
