@@ -76,6 +76,75 @@ test('Compact pressed mid-turn waits for turn.complete', async ($, on) => {
   expect(calls).toBe(1)
 })
 
+// Shared setup for the Compact failure-path tests below.
+function compactSetup(on: Parameters<Parameters<typeof test>[1]>[1], opts: { compact: () => unknown; command: () => unknown }) {
+  const seen = { commands: [] as string[], toasts: [] as string[] }
+  on('ui.render', ($, e) => h($.ui.resolve(e).Text, {}, 'x') as never)
+  on('clock.now', () => ({ value: 1_000_000 }) as never)
+  on('clock.every', () => ({ value: undefined }) as never)
+  on('session.usage', () => ({ value: { context: { window: 100 } } }) as never)
+  on('session.start', ($, e) => ({ cwd: e.cwd }) as never)
+  on('ui.toast', (_$, e) => {
+    seen.toasts.push(String((e as { text: string }).text))
+    return { value: undefined } as never
+  })
+  on('session.compact', () => opts.compact() as never)
+  on('command.run', (_$, e) => {
+    seen.commands.push(String((e as { command?: string }).command))
+    return opts.command() as never
+  })
+  on('turn.complete', () => ({ text: '' }) as never)
+  on('turn.step', async function* () {
+    return {
+      turnId: 't', index: 0, answer: '', toolUses: [], stopReason: 'end_turn',
+      usage: { input_tokens: 10, cache_read_input_tokens: 90, cache_creation_input_tokens: 0, output_tokens: 1 },
+    } as never
+  })
+  return seen
+}
+
+// The cache bar, and so the button, draws only after the first reply.
+async function firstReply($: Parameters<Parameters<typeof test>[1]>[0]) {
+  for await (const _ of $.turn.step({ turnId: 't', index: 0, model: 'm', messageCount: 1 } as never)) { /* drain */ }
+}
+
+test('Compact toasts when both compact() and /compact are refused', async ($, on) => {
+  const seen = compactSetup(on, {
+    compact: () => { throw new Error('compact is not available in this session') },
+    command: () => { throw new Error('commands are not available') },
+  })
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: false })
+  await firstReply($)
+
+  const m = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
+  await m.press({ key: 'compact' } as never)
+
+  expect(seen.commands).toEqual(['compact'])
+  // The harness reports a thrown hook as a skip, so the reason in the parentheses is its own.
+  expect(seen.toasts).toHaveLength(1)
+  expect(seen.toasts[0]).toMatch(/^Could not compact here \(.+\)\. Type \/compact\.$/)
+})
+
+test('a queued Compact that is refused runs /compact once, not every turn', async ($, on) => {
+  let calls = 0
+  const seen = compactSetup(on, {
+    compact: () => { calls++; throw new Error('compact is not available in this session') },
+    command: () => ({ text: '' }),
+  })
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: false })
+  await firstReply($)
+
+  const m = await $.ui.mount({ ...BAND, props: { ...BAND.props, isWorking: true }, surface: 'desktop' } as never)
+  await m.press({ key: 'compact' } as never)
+  expect(calls).toBe(0)
+
+  await $.turn.complete({ turnId: 't', answer: '' } as never)
+  await $.turn.complete({ turnId: 't2', answer: '' } as never)
+
+  expect(calls).toBe(1)
+  expect(seen.commands).toEqual(['compact'])
+})
+
 for (const isInteractive of [true, false]) {
   test(`Compact shows in every session, and falls back to /compact where compact() is refused (${isInteractive})`, async ($, on) => {
     const ran: string[] = []
